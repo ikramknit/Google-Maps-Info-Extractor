@@ -1,0 +1,5 @@
+{
+  "name": "Google Maps Info Extractor",
+  "description": "An application that extracts business name, address, and contact number from a Google Maps URL using AI.",
+  "requestFramePermissions": []
+}
