@@ -1,33 +1,59 @@
 import React, { useState, useCallback } from 'react';
 import type { BusinessInfo } from './types';
-import { extractInfoFromUrl, extractInfoFromText } from './services/geminiService';
+import { extractInfoFromUrl, extractInfoFromText, extractInfoFromSearch } from './services/geminiService';
 import { Loader } from './components/Loader';
 import { BusinessInfoTable } from './components/BusinessInfoTable';
 import { MapPinIcon } from './components/icons/MapPinIcon';
 import { DownloadIcon } from './components/icons/DownloadIcon';
 import { TrashIcon } from './components/icons/TrashIcon';
 import { ClipboardIcon } from './components/icons/ClipboardIcon';
+import { SearchIcon } from './components/icons/SearchIcon';
 
 declare var XLSX: any;
 
 const App: React.FC = () => {
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [url, setUrl] = useState<string>('');
   const [pastedText, setPastedText] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'url' | 'text'>('url');
+  const [activeTab, setActiveTab] = useState<'search' | 'url' | 'text'>('search');
 
   const [extractedData, setExtractedData] = useState<BusinessInfo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleExtractFromSearch = useCallback(async () => {
+    if (!searchQuery.trim()) {
+      setError('Please enter a search query.');
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
+    try {
+      const infoList = await extractInfoFromSearch(searchQuery);
+      if (infoList.length === 0) {
+        setError("No business details could be found for this search. Please try a different query.");
+      } else {
+        setExtractedData(prevData => [...infoList, ...prevData]);
+      }
+      setSearchQuery('');
+    } catch (err) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('An unknown error occurred.');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [searchQuery]);
 
   const handleExtractFromUrl = useCallback(async () => {
     if (!url) {
       setError('Please enter a Google Maps URL.');
       return;
     }
-
     setIsLoading(true);
     setError(null);
-
     try {
       const infoList = await extractInfoFromUrl(url);
       if (infoList.length === 0) {
@@ -35,7 +61,7 @@ const App: React.FC = () => {
       } else {
         setExtractedData(prevData => [...infoList, ...prevData]);
       }
-      setUrl(''); // Clear input on success
+      setUrl('');
     } catch (err) {
       if (err instanceof Error) {
         setError(err.message);
@@ -52,10 +78,8 @@ const App: React.FC = () => {
       setError('Please paste some text to extract from.');
       return;
     }
-
     setIsLoading(true);
     setError(null);
-
     try {
       const infoList = await extractInfoFromText(pastedText);
       if (infoList.length === 0) {
@@ -63,7 +87,7 @@ const App: React.FC = () => {
       } else {
         setExtractedData(prevData => [...infoList, ...prevData]);
       }
-      setPastedText(''); // Clear textarea on success
+      setPastedText('');
     } catch (err) {
       if (err instanceof Error) {
         setError(err.message);
@@ -75,7 +99,13 @@ const App: React.FC = () => {
     }
   }, [pastedText]);
 
-  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleSearchKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleExtractFromSearch();
+    }
+  };
+
+  const handleUrlKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       handleExtractFromUrl();
     }
@@ -89,7 +119,6 @@ const App: React.FC = () => {
 
   const handleDownloadXlsx = () => {
     if (extractedData.length === 0) return;
-
     const headers = ['S.No.', 'Business Name', 'Address', 'Contact Number'];
     const dataToExport = extractedData.map((row, index) => [
       index + 1,
@@ -102,33 +131,39 @@ const App: React.FC = () => {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Google Maps Data');
     
-    // Auto-size columns
     const cols = Object.keys(worksheet).filter(key => key.match(/^[A-Z]+1$/)).map(key => {
         const col = key.replace(/[0-9]/g, '');
         const dataForCol = [headers[XLSX.utils.decode_col(col)], ...dataToExport.map(row => row[XLSX.utils.decode_col(col)])];
         const maxLength = Math.max(...dataForCol.map(item => String(item || '').length));
-        return { wch: maxLength + 2 }; // +2 for padding
+        return { wch: maxLength + 2 };
     });
     worksheet['!cols'] = cols;
 
     XLSX.writeFile(workbook, 'google_maps_data.xlsx');
   };
 
-
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 font-sans">
       <div className="w-full max-w-4xl mx-auto">
         <header className="text-center mb-10">
           <h1 className="text-4xl md:text-5xl font-bold text-slate-800 tracking-tight">
-            Bulk Maps Info Extractor
+            Google Maps List Builder
           </h1>
           <p className="mt-3 text-lg text-slate-600 max-w-2xl mx-auto">
-            Paste a Google Maps URL or text to extract business details. To build a large list, go to the next page of results on Maps, then paste the new URL here.
+            Build large lists of business contacts by running multiple searches. Each search adds new results to your table, which you can download as an Excel file.
           </p>
         </header>
 
         <main className="bg-white p-6 md:p-8 rounded-2xl shadow-md border border-slate-200">
           <div className="flex border-b border-slate-200 mb-6">
+            <button
+              onClick={() => setActiveTab('search')}
+              aria-pressed={activeTab === 'search'}
+              className={`flex items-center gap-2 px-4 py-3 text-lg font-semibold border-b-4 transition-colors duration-300 ${activeTab === 'search' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+            >
+              <SearchIcon className="w-6 h-6" />
+              Direct Search
+            </button>
             <button
               onClick={() => setActiveTab('url')}
               aria-pressed={activeTab === 'url'}
@@ -147,14 +182,36 @@ const App: React.FC = () => {
             </button>
           </div>
 
-          {activeTab === 'url' ? (
+          {activeTab === 'search' && (
+            <div className="relative flex flex-col sm:flex-row items-center gap-4">
+              <SearchIcon className="absolute left-4 top-4 text-slate-400 hidden sm:block" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyPress={handleSearchKeyPress}
+                placeholder="e.g., cafes in San Francisco"
+                className="w-full h-14 pl-4 sm:pl-12 pr-40 py-2 text-lg text-slate-700 bg-slate-100 border-2 border-transparent rounded-xl focus:outline-none focus:ring-4 focus:ring-indigo-300 focus:border-indigo-500 transition-shadow duration-300"
+                disabled={isLoading}
+              />
+              <button
+                onClick={handleExtractFromSearch}
+                disabled={isLoading}
+                className="absolute right-2 top-1/2 -translate-y-1/2 sm:static sm:transform-none sm:h-14 sm:w-auto w-[calc(100%-1rem)] sm:px-8 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-300 disabled:bg-slate-400 disabled:cursor-not-allowed transition-all duration-300"
+              >
+                {isLoading ? 'Searching...' : 'Search & Extract'}
+              </button>
+            </div>
+          )}
+
+          {activeTab === 'url' && (
             <div className="relative flex flex-col sm:flex-row items-center gap-4">
               <MapPinIcon className="absolute left-4 top-4 text-slate-400 hidden sm:block" />
               <input
                 type="url"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                onKeyPress={handleKeyPress}
+                onKeyPress={handleUrlKeyPress}
                 placeholder="https://www.google.com/maps/..."
                 className="w-full h-14 pl-4 sm:pl-12 pr-40 py-2 text-lg text-slate-700 bg-slate-100 border-2 border-transparent rounded-xl focus:outline-none focus:ring-4 focus:ring-indigo-300 focus:border-indigo-500 transition-shadow duration-300"
                 disabled={isLoading}
@@ -164,10 +221,12 @@ const App: React.FC = () => {
                 disabled={isLoading}
                 className="absolute right-2 top-1/2 -translate-y-1/2 sm:static sm:transform-none sm:h-14 sm:w-auto w-[calc(100%-1rem)] sm:px-8 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-300 disabled:bg-slate-400 disabled:cursor-not-allowed transition-all duration-300"
               >
-                {isLoading ? 'Extracting...' : 'Extract Info'}
+                {isLoading ? 'Extracting...' : 'Extract from URL'}
               </button>
             </div>
-          ) : (
+          )}
+          
+          {activeTab === 'text' && (
              <div className="flex flex-col items-center gap-4">
                <textarea
                  value={pastedText}
@@ -186,6 +245,11 @@ const App: React.FC = () => {
                </button>
              </div>
           )}
+
+          <div className="mt-6 p-4 bg-indigo-50 border border-indigo-200 rounded-lg text-indigo-800 text-center">
+            <p className="font-semibold">How to build a list of 1000+ contacts:</p>
+            <p className="text-sm mt-1">The AI can only extract from the first page of search results (about 20 businesses) for each query. To build a large list, run multiple specific searches (e.g., "plumbers in Brooklyn", then "plumbers in Queens"). All results will be added to the table below.</p>
+          </div>
         </main>
 
         <section className="mt-8">
@@ -198,15 +262,20 @@ const App: React.FC = () => {
 
           {extractedData.length > 0 && (
             <div className="animate-fade-in">
-              <div className="flex justify-end items-center gap-4 mb-4">
-                 <button onClick={handleDownloadXlsx} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 focus:outline-none focus:ring-4 focus:ring-green-300 transition-colors duration-300">
-                  <DownloadIcon className="w-5 h-5" />
-                  Download Excel
-                </button>
-                 <button onClick={handleClearAll} className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 focus:outline-none focus:ring-4 focus:ring-red-300 transition-colors duration-300">
-                  <TrashIcon className="w-5 h-5" />
-                  Clear All
-                </button>
+              <div className="flex justify-between items-center gap-4 mb-4">
+                <div className="font-semibold text-slate-600">
+                  Total Records: <span className="text-indigo-600">{extractedData.length}</span>
+                </div>
+                <div className="flex items-center gap-4">
+                  <button onClick={handleDownloadXlsx} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 focus:outline-none focus:ring-4 focus:ring-green-300 transition-colors duration-300">
+                    <DownloadIcon className="w-5 h-5" />
+                    Download Excel
+                  </button>
+                  <button onClick={handleClearAll} className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 focus:outline-none focus:ring-4 focus:ring-red-300 transition-colors duration-300">
+                    <TrashIcon className="w-5 h-5" />
+                    Clear All
+                  </button>
+                </div>
               </div>
               <BusinessInfoTable data={extractedData} />
             </div>

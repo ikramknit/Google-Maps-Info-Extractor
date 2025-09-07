@@ -122,3 +122,64 @@ Provide only the raw JSON array in your response.`;
     throw new Error("Failed to extract information from the provided text.");
   }
 };
+
+export const extractInfoFromSearch = async (query: string): Promise<BusinessInfo[]> => {
+  if (!query.trim()) {
+    throw new Error('Please enter a search query.');
+  }
+
+  try {
+    const prompt = `Your task is to act as a Google Maps business extractor. The user has provided the search query: "${query}".
+First, use Google Search to find relevant businesses on Google Maps that match this query.
+Then, for each business found, perform a targeted search to find its official name, full street address, and primary phone number. If multiple phone numbers are listed, please return only the first or most prominent one.
+Return a JSON array where each object contains "name", "address", and "phone".
+If a detail for a business is unavailable, use the string "N/A".
+Provide only the raw JSON array in your response.`;
+    
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+      config: {
+        tools: [{googleSearch: {}}],
+      },
+    });
+
+    let text = response.text.trim();
+    
+    if (text.startsWith('```json')) {
+      text = text.substring(7, text.length - 3).trim();
+    } else if (text.startsWith('```')) {
+      text = text.substring(3, text.length - 3).trim();
+    }
+    
+    const parsedJson = JSON.parse(text);
+
+    if (!Array.isArray(parsedJson)) {
+      if (typeof parsedJson === 'object' && parsedJson !== null && parsedJson.name) {
+           const business: BusinessInfo = {
+              name: parsedJson.name || 'N/A',
+              address: parsedJson.address || 'N/A',
+              phone: parsedJson.phone || 'N/A',
+          };
+          return business.phone && business.phone.trim() !== 'N/A' && business.phone.trim() !== '' ? [business] : [];
+      }
+      console.warn("Gemini API did not return an array. Response:", parsedJson);
+      throw new Error("The AI's response was not in the expected format (an array of businesses).");
+    }
+
+    return parsedJson.map(item => ({
+        name: item.name || 'N/A',
+        address: item.address || 'N/A',
+        phone: item.phone || 'N/A',
+    })).filter(business => business.phone && business.phone.trim() !== 'N/A' && business.phone.trim() !== '');
+  } catch (error) {
+    console.error("Error processing Gemini API response from search:", error);
+    if (error instanceof SyntaxError) {
+        throw new Error("Failed to parse the AI's response. The format was unexpected.");
+    }
+    if (error instanceof Error && error.message.startsWith("The AI's response was not in the expected format")) {
+      throw error;
+    }
+    throw new Error("Failed to extract information for the search query. Please try again or refine your search.");
+  }
+};
